@@ -1,0 +1,600 @@
+---
+title: "DATA622 ASSIGNMENT 1 - Run the model exercise"
+author: "Fan Xu"
+date: "10/9/2020"
+output:
+  rmdformats::readthedown:
+    code_folding: hide
+    df_print: paged
+    highlight: tango
+    number_sections: yes
+    smooth_scroll: yes
+    theme: united
+    toc_collapsed: yes
+    toc_depth: 5
+    toc_float: yes
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_collapsed: yes
+    toc_float: yes
+  pdf_document:
+    extra_dependencies:
+    - geometry
+    - multicol
+    - multirow
+  word_document:
+    toc: yes
+    toc_depth: '5'
+theme: lumen
+number_sections: yes
+toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load package, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(tidymodels)
+library(GGally)
+library(discrim)
+library(kknn)
+library(knitr)
+library(kableExtra)
+```
+
+# Data Exploration
+
+## Load Data
+```{r load data, message=FALSE, warning=FALSE}
+data <- read_csv('https://raw.githubusercontent.com/oggyluky11/DATA622-FALL-2020/main/HW1/data.csv') %>%
+  mutate_if(is.character,as.factor)
+
+data
+```
+
+## Data Summary
+```{r data summary}
+summary(data)
+```
+
+## Train Test Split
+
+```{r}
+set.seed(123)
+train_test_split <- initial_split(data, prop = 0.75, strata = 'label')
+data_train <- training(train_test_split)
+data_test <- testing(train_test_split)
+
+
+```
+
+
+### Training Set
+```{r training set}
+data_train
+summary(data_train)
+```
+
+### Testing Set
+```{r testing set}
+data_test
+summary(data_test)
+```
+
+
+# Logistic Regression
+
+## Construct Logicstic Regression Classifier
+```{r LR fit}
+LR_fit <- logistic_reg() %>%
+  set_mode('classification') %>%
+  set_engine('glm') %>%
+  fit(label ~ ., data_train)
+
+
+LR_fit
+
+```
+
+
+## Model Prediction
+
+### Prediction on Training Set
+```{r predict lr on training set, message=FALSE, warning=FALSE}
+
+LR_train_pred <- predict(LR_fit, data_train) %>%
+  bind_cols(data_train) %>%
+  bind_cols(predict(LR_fit,data_train, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+
+LR_train_pred
+```
+
+### Model Evaluation on Training Data
+
+#### ROC Curve & AUC on Training Data
+```{r roc}
+LR_train_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+LR_train_pred_AUC <- LR_train_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+LR_train_pred_AUC
+```
+
+#### Metrics from Confusion Matrix
+```{r confusion matrix metrics}
+#create a function to calculate required metrics
+confusion_matrix_metrics <- function(m){
+  tp <- m[1,1]
+  fp <- m[1,2]
+  fn <- m[2,1]
+  tn <- m[2,2]
+  ACCURACY <- (tp+tn)/sum(m)
+  TPR <- tp/(tp+fn)
+  TNR <- tn/(tn+fp)
+  FPR <- 1 - TNR
+  FNR <- 1 - TPR
+  return(data.frame(ACCURACY, TPR, FPR, TNR, FNR))
+  
+}
+```
+
+
+
+```{r confusion matrix for LR training set}
+LR_train_conf_m <- LR_train_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+LR_train_conf_m
+```
+
+
+```{r accruracy metrics on lr traing set}
+LR_train_conf_m_metrics <- confusion_matrix_metrics(LR_train_conf_m)
+LR_train_conf_m_metrics
+```
+
+### Overall Performance Metrics Table
+```{r lr train overall metrics}
+LR_train_metrics <- bind_cols(Algo = 'LR', 
+                              Data_Set = 'Train',
+                              AUC = LR_train_pred_AUC,
+                              LR_train_conf_m_metrics)
+
+LR_train_metrics
+```
+
+
+### Prediction on Testing data & Calculate Overall Performance Matrics Table
+
+Using the same approaches to make prediction on testing data
+```{r lr testing over all metrics}
+# make prediction on testing data
+LR_test_pred <- predict(LR_fit, data_test) %>%
+  bind_cols(data_test) %>%
+  bind_cols(predict(LR_fit,data_test, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+# produce ROC Curve from traning data
+LR_test_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+# get AUC from testing data
+LR_test_pred_AUC <- LR_test_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+# get confusion matrix from testing set
+LR_test_conf_m <- LR_test_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+# get accuracy metrics from confusion matrix
+LR_test_conf_m_metrics <- confusion_matrix_metrics(LR_test_conf_m)
+
+# Summarize overall performance metrics for LR testing data
+LR_test_metrics <- bind_cols(Algo = 'LR', 
+                              Data_Set = 'Test',
+                              AUC = LR_test_pred_AUC,
+                              LR_test_conf_m_metrics)
+
+LR_test_metrics
+
+```
+
+
+# Naive Bayers Classifier
+
+Construct an Naive Bayers Classifier
+```{r Naive Bayers Classifier}
+NB_fit <- naive_Bayes() %>%
+  set_mode('classification') %>%
+  set_engine('klaR') %>%
+  fit(label ~ ., data_train)
+
+NB_fit
+```
+
+
+
+## Model Prediction
+
+### Prediction on Training Set
+```{r predict NB on training set}
+
+NB_train_pred <- predict(NB_fit, data_train) %>%
+  bind_cols(data_train) %>%
+  bind_cols(predict(NB_fit,data_train, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+
+NB_train_pred
+```
+
+### Model Evaluation on Training Data
+
+#### ROC Curve & AUC on Training Data
+```{r roc NB}
+NB_train_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+NB_train_pred_AUC <- NB_train_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+NB_train_pred_AUC
+```
+
+#### Metrics from Confusion Matrix
+
+```{r confusion matrix for NB training set}
+NB_train_conf_m <- NB_train_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+NB_train_conf_m
+```
+
+
+```{r accruracy metrics on NB traing set}
+NB_train_conf_m_metrics <- confusion_matrix_metrics(NB_train_conf_m)
+NB_train_conf_m_metrics
+```
+
+### Overall Performance Metrics Table
+```{r NB train overall metrics}
+NB_train_metrics <- bind_cols(Algo = 'NB', 
+                              Data_Set = 'Train',
+                              AUC = NB_train_pred_AUC,
+                              NB_train_conf_m_metrics)
+
+NB_train_metrics
+```
+
+
+### Prediction on Testing data & Calculate Overall Performance Matrics Table
+
+Using the same approaches to make prediction on testing data
+```{r NB testing over all metrics}
+# make prediction on testing data
+NB_test_pred <- predict(NB_fit, data_test) %>%
+  bind_cols(data_test) %>%
+  bind_cols(predict(NB_fit,data_test, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+# produce ROC Curve from traning data
+NB_test_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+# get AUC from testing data
+NB_test_pred_AUC <- NB_test_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+# get confusion matrix from testing set
+NB_test_conf_m <- NB_test_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+# get accuracy metrics from confusion matrix
+NB_test_conf_m_metrics <- confusion_matrix_metrics(NB_test_conf_m)
+
+# Summarize overall performance metrics for NB testing data
+NB_test_metrics <- bind_cols(Algo = 'NB', 
+                              Data_Set = 'Test',
+                              AUC = NB_test_pred_AUC,
+                              NB_test_conf_m_metrics)
+
+NB_test_metrics
+
+```
+
+
+
+# KNN Classifier (k = 3)
+
+Construct an KNN Classifier
+```{r KNN 3}
+KNN_3_fit <- nearest_neighbor(neighbors = 3) %>%
+  set_mode('classification') %>%
+  set_engine('kknn') %>%
+  translate() %>%
+  fit(label ~ ., data_train)
+
+KNN_3_fit
+```
+
+
+
+## Model Prediction
+
+### Prediction on Training Set
+```{r predict KNN 3 on training set}
+
+KNN_3_train_pred <- predict(KNN_3_fit, data_train) %>%
+  data.frame(`.pred_class` = .) %>%
+  bind_cols(data_train) %>%
+  bind_cols(predict(KNN_3_fit,data_train, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+
+KNN_3_train_pred
+```
+
+### Model Evaluation on Training Data
+
+#### ROC Curve & AUC on Training Data
+```{r roc KNN 3}
+KNN_3_train_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+KNN_3_train_pred_AUC <- KNN_3_train_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+KNN_3_train_pred_AUC
+```
+
+#### Metrics from Confusion Matrix
+
+```{r confusion matrix for KNN 3 training set}
+KNN_3_train_conf_m <- KNN_3_train_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+KNN_3_train_conf_m
+```
+
+
+```{r accruracy metrics on KNN 3 traing set}
+KNN_3_train_conf_m_metrics <- confusion_matrix_metrics(KNN_3_train_conf_m)
+KNN_3_train_conf_m_metrics
+```
+
+### Overall Performance Metrics Table
+```{r KNN 3 train overall metrics}
+KNN_3_train_metrics <- bind_cols(Algo = 'KNN (k=3)', 
+                              Data_Set = 'Train',
+                              AUC = KNN_3_train_pred_AUC,
+                              KNN_3_train_conf_m_metrics)
+
+KNN_3_train_metrics
+```
+
+
+### Prediction on Testing data & Calculate Overall Performance Matrics Table
+
+Using the same approaches to make prediction on testing data
+```{r KNN 3 testing over all metrics}
+# make prediction on testing data
+KNN_3_test_pred <- predict(KNN_3_fit, data_test) %>%
+  bind_cols(data_test) %>%
+  bind_cols(predict(KNN_3_fit,data_test, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+# produce ROC Curve from traning data
+KNN_3_test_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+# get AUC from testing data
+KNN_3_test_pred_AUC <- KNN_3_test_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+# get confusion matrix from testing set
+KNN_3_test_conf_m <- KNN_3_test_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+# get accuracy metrics from confusion matrix
+KNN_3_test_conf_m_metrics <- confusion_matrix_metrics(KNN_3_test_conf_m)
+
+# Summarize overall performance metrics for KNN 3 testing data
+KNN_3_test_metrics <- bind_cols(Algo = 'KNN (k=3)', 
+                              Data_Set = 'Test',
+                              AUC = KNN_3_test_pred_AUC,
+                              KNN_3_test_conf_m_metrics)
+
+KNN_3_test_metrics
+
+```
+
+
+# KNN Classifier (k = 5)
+
+Construct an KNN Classifier
+```{r KNN 5}
+KNN_5_fit <- nearest_neighbor(neighbors = 5) %>%
+  set_mode('classification') %>%
+  set_engine('kknn') %>%
+  translate() %>%
+  fit(label ~ ., data_train)
+
+KNN_5_fit
+```
+
+
+
+## Model Prediction
+
+### Prediction on Training Set
+```{r predict KNN 5 on training set}
+
+KNN_5_train_pred <- predict(KNN_5_fit, data_train) %>%
+  data.frame(`.pred_class` = .) %>%
+  bind_cols(data_train) %>%
+  bind_cols(predict(KNN_5_fit,data_train, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+
+KNN_5_train_pred
+```
+
+### Model Evaluation on Training Data
+
+#### ROC Curve & AUC on Training Data
+```{r roc KNN 5}
+KNN_5_train_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+KNN_5_train_pred_AUC <- KNN_3_train_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+KNN_5_train_pred_AUC
+```
+
+#### Metrics from Confusion Matrix
+
+```{r confusion matrix for KNN 5 training set}
+KNN_5_train_conf_m <- KNN_5_train_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+KNN_5_train_conf_m
+```
+
+
+```{r accruracy metrics on KNN 5 traing set}
+KNN_5_train_conf_m_metrics <- confusion_matrix_metrics(KNN_5_train_conf_m)
+KNN_5_train_conf_m_metrics
+```
+
+### Overall Performance Metrics Table
+```{r KNN 5 train overall metrics}
+KNN_5_train_metrics <- bind_cols(Algo = 'KNN (K=5)', 
+                              Data_Set = 'Train',
+                              AUC = KNN_5_train_pred_AUC,
+                              KNN_5_train_conf_m_metrics)
+
+KNN_5_train_metrics
+```
+
+
+### Prediction on Testing data & Calculate Overall Performance Matrics Table
+
+Using the same approaches to make prediction on testing data
+```{r KNN 5 testing over all metrics}
+# make prediction on testing data
+KNN_5_test_pred <- predict(KNN_5_fit, data_test) %>%
+  bind_cols(data_test) %>%
+  bind_cols(predict(KNN_5_fit,data_test, type ='prob')) %>%
+  select(.pred_class, label, everything())
+
+# produce ROC Curve from traning data
+KNN_5_test_pred %>% roc_curve(label, .pred_BLACK) %>% autoplot()
+
+# get AUC from testing data
+KNN_5_test_pred_AUC <- KNN_5_test_pred %>% 
+  roc_auc(label, .pred_BLACK) %>%
+  select(.estimate) %>%
+  rename(AUC = `.estimate`)
+
+# get confusion matrix from testing set
+KNN_5_test_conf_m <- KNN_5_test_pred %>%
+  select(.pred_class,label) %>%
+  table() %>%
+  as.matrix() 
+
+# get accuracy metrics from confusion matrix
+KNN_5_test_conf_m_metrics <- confusion_matrix_metrics(KNN_5_test_conf_m)
+
+# Summarize overall performance metrics for LR testing data
+KNN_5_test_metrics <- bind_cols(Algo = 'KNN (k=5)', 
+                              Data_Set = 'Test',
+                              AUC = KNN_5_test_pred_AUC,
+                              KNN_5_test_conf_m_metrics)
+
+KNN_5_test_metrics
+
+```
+
+
+# Summary
+## Model Performance Metrics
+### Metrics of Training Set (Model's Capacity to Learn)
+```{r summary training Set}
+
+bind_rows(LR_train_metrics,
+          NB_train_metrics,
+          KNN_3_train_metrics,
+          KNN_5_train_metrics) %>%
+  select(-Data_Set) %>%
+  kable(caption = 'Model Performance Metrics on Training Data') #%>%
+  #kable_styling(bootstrap_options = c('bordered','striped')) %>%
+  #add_header_above(c('Model Performance Metrics on Training Data'=7))
+```
+
+
+### Metrics of Testing Set (model's Ability to Generalize)
+```{r summary testing Set}
+
+bind_rows(LR_test_metrics,
+          NB_test_metrics,
+          KNN_3_test_metrics,
+          KNN_5_test_metrics) %>%
+  select(-Data_Set) %>%
+  kable(caption = 'Model Performance Metrics on Testing Data') #%>%
+  #kable_styling(bootstrap_options = c('bordered','striped')) %>%
+  #add_header_above(c('Model Performance Metrics on Testing Data'=7))
+```
+
+
+## Model Performance Analysis
+
+### Model Description
+
+**1. Logistic Regression (LR)**
+  LR is a discriminative classifier, means it directly computes the conditional probability P(class|data). The classification is determined base on a given threshold of probalitility. Also, given a sufficent sample size, logistic regression has a better peformance compared to Naive Bayes classifier in terms of accuracy. 
+
+**2. Naive Bayes Classifier (NB)**
+  NB is a generative classifier because it first generate the joint probability P(class, data) then computes the comditional probability P(class|data). The generated probability is a N-values descrete output where N is the number of classes in the response variable (the label), the classificiation is detemined to be the class that holds the largest P(Class|data). Also, regardless of sample size, Naive Bayes always converge faster to its asymptotic error compared to LR, which means it 'learns' faster.
+  
+**3. KNN Classifier**
+  KNN is a discriminative algorithm since it directly models the conditional probability P(class|data). The performance of KNN depends on the choice of K and is negatively impacted by the complexity of the variable space (the number of variables) because it directly focusses on the distance between the target data point and the other data points. As variable space because more and more complex, the abstraction of high dimentional distance calculation make the distance not a good representation of the similarty. The data is used in this project only has two predictor variables therefore KNN can performs well.
+  
+  
+### Selection of Model that Has Best Capacity to Learn
+  According to the model performance statistics of the training data, KNN model with K = 3 has the best performance statistics in terms of AUC, Accuracy, TPR, FRP, TNR and FNR, following by KNN with K = 5, Naive Bayes and Logistic Regression in order. Therefore KNN with K = 3 shows it has the best capacity to learn among all models in this project.
+  
+
+### Selection of Model that Has Best Performance on Generalizing.
+   According to the model performance statistics of the testing data, Naive Bayes (NB) has the best performance statistics in terms of AUC, Accuracy, TPR, FRP, TNR and FNR, following by Logistic Regression, KNN with K = 5 and KNN with K = 3 in order. Therefore Naive Bayes shows it has the best ability to generalize among all models in this project. 
+   
+However, from business perspective, because the models are built based on a data set which contains only 36 observations, the performance of the models are yet to be further re-evaluated given more data are collected in future business operations. 
+    
